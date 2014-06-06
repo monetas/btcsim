@@ -5,15 +5,17 @@
 package main
 
 import (
-	"github.com/conformal/btcutil"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/conformal/btcutil"
 )
 
 // ChainServer describes the arguments necessary to connect a btcwallet
@@ -53,8 +55,14 @@ func (p *btcdCmdArgs) args() []string {
 	}
 }
 
+type txRequest chan btcutil.Address
+
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	rand.Seed(int64(time.Now().Nanosecond()))
+
+	upstream := make(txRequest, actorsAmount)
+	downstream := make(txRequest, actorsAmount)
 
 	var wg sync.WaitGroup
 	actors := make([]*Actor, 0, actorsAmount)
@@ -105,31 +113,50 @@ func main() {
 		// The way of assigning ports should definitely be reconsidered.
 		a, err := NewActor(&defaultChainServer, uint16(18557+i))
 		if err != nil {
-			log.Fatalf("Cannot create actor: %v", err)
+			log.Printf("Cannot create actor on %s: %v", "localhost"+a.args.port, err)
+			continue
 		}
 		actors = append(actors, a)
 	}
 
-	// Start and run for a few seconds.
+	// Start actors.
+	for _, a := range actors {
+		go func(a *Actor, up, down txRequest) {
+			if err := a.Start(os.Stderr, os.Stdout, up, down); err != nil {
+				log.Printf("Cannot start actor on %s: %v", "localhost"+a.args.port, err)
+				// TODO: reslice when one actor cannot start
+			}
+		}(a, upstream, downstream)
+	}
+
+out:
+	for {
+		select {
+		case addr := <-upstream:
+			time.Sleep(time.Second)
+			downstream <- addr
+		case <-stop:
+			break out
+		default:
+		}
+	}
+
+	log.Println("Time to die")
+
+	// Shutdown actors.
 	for _, a := range actors {
 		wg.Add(1)
 		go func(a *Actor) {
 			defer wg.Done()
-			if err := a.Start(os.Stderr, os.Stdout); err != nil {
-				log.Fatalf("Cannot start actor: %v", err)
-			}
-
-			log.Println("Running actor for a few seconds")
-			time.Sleep(3 * time.Second)
-			log.Println("Time to die")
-
 			if err := a.Stop(); err != nil {
-				log.Fatalf("Cannot stop actor: %v", err)
+				log.Printf("Cannot stop actor on %s: %v", "localhost"+a.args.port, err)
+				return
 			}
 			if err := a.Cleanup(); err != nil {
-				log.Fatalf("Cannot cleanup actor directory: %v", err)
+				log.Printf("Cannot cleanup actor on %s directory: %v", "localhost"+a.args.port, err)
+				return
 			}
-			log.Println("Actor shutdown successfully")
+			log.Printf("Actor on %s shutdown successfully", "localhost"+a.args.port)
 		}(a)
 	}
 	wg.Wait()

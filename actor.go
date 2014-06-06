@@ -18,6 +18,7 @@ import (
 
 	rpc "github.com/conformal/btcrpcclient"
 	"github.com/conformal/btcutil"
+	"github.com/conformal/btcwire"
 )
 
 // These constants define the strings used for actor's authentication and
@@ -37,19 +38,33 @@ const (
 )
 
 var (
-	once         sync.Once
-	connected    = make(chan struct{}, actorsAmount)
+	onceConnected sync.Once
+	connected     = make(chan struct{}, actorsAmount)
+
+	twiceBlockConnected sync.Once
+	stop                = make(chan struct{})
+
 	ntfnHandlers = rpc.NotificationHandlers{
 		OnBtcdConnected: func(conn bool) {
 			if conn {
-				once.Do(func() {
+				onceConnected.Do(func() {
 					for i := 0; i < actorsAmount; i++ {
 						connected <- struct{}{}
 					}
 				})
 			}
 		},
+		OnBlockConnected: func(hash *btcwire.ShaHash, height int32) {
+			// When a second block connects to the chain after actors have started,
+			// send signal to stop actors.
+			if height-startingHeight > 1 {
+				twiceBlockConnected.Do(func() {
+					stop <- struct{}{}
+				})
+			}
+		},
 	}
+	startingHeight int32
 )
 
 // Actor describes an actor on the simulation network.  Each actor runs
@@ -105,7 +120,7 @@ func NewActor(chain *ChainServer, port uint16) (*Actor, error) {
 // If the RPC client connction cannot be established or wallet cannot
 // be created, the wallet process is killed and the actor directory
 // removed.
-func (a *Actor) Start(stderr, stdout io.Writer) error {
+func (a *Actor) Start(stderr, stdout io.Writer, upstream, downstream txRequest) error {
 	// Overwriting the previously created command would be sad.
 	if a.cmd != nil {
 		return errors.New("actor command previously created")
@@ -184,6 +199,17 @@ func (a *Actor) Start(stderr, stdout io.Writer) error {
 		addressSpace[i] = addr
 	}
 
+	// Register for block notifications.
+	if err := client.NotifyBlocks(); err != nil {
+		log.Printf("Cannot register for block notifications: %v", err)
+	}
+
+	// Just use the first actor
+	if a.args.port == "18557" {
+		_, startingHeight, _ = a.client.GetBestBlock()
+		// Once setaccount will be implemented more things can happen in here.
+	}
+
 	// Start sending funds to the addresses the wallet already owns.
 	// At this point we are just going to iterate over our address slice
 	// without any use of concurrent primitives. Most of the following code
@@ -198,10 +224,18 @@ func (a *Actor) Start(stderr, stdout io.Writer) error {
 		return nil
 	}
 
-	// Tx per second
-	for _ = range time.Tick(time.Second) {
-		for i := 0; i < txPerSec; i++ {
-			a.client.SendFromMinConf("", addressSpace[rand.Int()%addressNum], balance/10, 0)
+out:
+	for {
+		// TODO: check for balance
+		select {
+		case upstream <- addressSpace[rand.Int()%addressNum]:
+			log.Printf("%s: Sending address to upstream", "localhost:"+a.args.port)
+		case addr := <-downstream:
+			log.Printf("%s: Received %v from downstream", "localhost:"+a.args.port, addr)
+			// TODO: send tx over received addr
+		case <-a.quit:
+			// TODO: send all funds back to a dedicated address
+			break out
 		}
 	}
 
