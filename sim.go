@@ -124,7 +124,7 @@ func main() {
 		go func(a *Actor, up, down txRequest) {
 			if err := a.Start(os.Stderr, os.Stdout, up, down); err != nil {
 				log.Printf("Cannot start actor on %s: %v", "localhost"+a.args.port, err)
-				// TODO: reslice when one actor cannot start
+				// TODO: reslice actors when one actor cannot start
 			}
 		}(a, upstream, downstream)
 	}

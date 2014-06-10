@@ -31,8 +31,6 @@ const (
 
 	// Number of addresses in a wallet
 	addressNum = 1000
-	// Allowed transactions per second
-	txPerSec = 3
 	// Number of actors
 	actorsAmount = 1
 )
@@ -70,10 +68,10 @@ var (
 // Actor describes an actor on the simulation network.  Each actor runs
 // independantly without external input to decide it's behavior.
 type Actor struct {
-	args   procArgs
-	cmd    *exec.Cmd
-	client *rpc.Client
-
+	args    procArgs
+	cmd     *exec.Cmd
+	client  *rpc.Client
+	balance btcutil.Amount
 	// Parameters specifying how actor behaves should be included here.
 
 	quit chan struct{}
@@ -193,53 +191,52 @@ func (a *Actor) Start(stderr, stdout io.Writer, upstream, downstream txRequest) 
 	for i := range addressSpace {
 		addr, err := client.GetNewAddress()
 		if err != nil {
-			log.Printf("%s: Cannot create address #%d", "localhost:"+a.args.port, i+1)
+			log.Printf("%s: Cannot create address #%d", rpcConf.Host, i+1)
 			return err
 		}
 		addressSpace[i] = addr
 	}
 
-	// Register for block notifications.
-	if err := client.NotifyBlocks(); err != nil {
-		log.Printf("Cannot register for block notifications: %v", err)
-	}
+	// TODO: Start mining here
 
-	// Just use the first actor
+	// Use the first actor to get current block height
 	if a.args.port == "18557" {
 		_, startingHeight, _ = a.client.GetBestBlock()
-		// Once setaccount will be implemented more things can happen in here.
 	}
 
-	// Start sending funds to the addresses the wallet already owns.
-	// At this point we are just going to iterate over our address slice
-	// without any use of concurrent primitives. Most of the following code
-	// should change once we move to use of many actors.
-	balance, err := a.client.GetBalanceMinConf("", 0)
-	if err != nil {
-		log.Printf("%s: Cannot see account balance!", "localhost:"+a.args.port)
-		return nil
+	// Register for block notifications.
+	if err := client.NotifyBlocks(); err != nil {
+		log.Printf("%s: Cannot register for block notifications: %v", rpcConf.Host, err)
 	}
-	if balance <= 0 {
-		log.Printf("%s: Insufficient funds!", "localhost:"+a.args.port)
-		return nil
-	}
+
+	a.BalanceUpdate()
 
 out:
 	for {
-		// TODO: check for balance
 		select {
 		case upstream <- addressSpace[rand.Int()%addressNum]:
-			log.Printf("%s: Sending address to upstream", "localhost:"+a.args.port)
+			log.Printf("%s: Sending address to upstream", rpcConf.Host)
 		case addr := <-downstream:
-			log.Printf("%s: Received %v from downstream", "localhost:"+a.args.port, addr)
+			log.Printf("%s: Received %v from downstream", rpcConf.Host, addr)
 			// TODO: send tx over received addr
 		case <-a.quit:
-			// TODO: send all funds back to a dedicated address
 			break out
 		}
 	}
 
 	return nil
+}
+
+func (a *Actor) BalanceUpdate() {
+	var err error
+
+	a.balance, err = a.client.GetUnconfirmedBalance("")
+	if err != nil {
+		log.Printf("%s: Cannot see account balance!", "localhost:"+a.args.port)
+	} else if a.balance == 0 {
+		log.Printf("%s: Insufficient funds!", "localhost:"+a.args.port)
+	}
+	return
 }
 
 // Stop kills the Actor's wallet process and shuts down any goroutines running
