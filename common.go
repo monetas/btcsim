@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"time"
 
-	rpc "github.com/btcsuite/btcrpcclient"
+	rpc "github.com/monetas/btcrpcclient"
 )
 
 // ErrConnectionTimeOut is raised when a rpc client is unable to connect

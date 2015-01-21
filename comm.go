@@ -14,12 +14,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcchain"
-	"github.com/btcsuite/btcnet"
-	rpc "github.com/btcsuite/btcrpcclient"
-	"github.com/btcsuite/btcscript"
-	"github.com/btcsuite/btcutil"
-	"github.com/btcsuite/btcwire"
+	"github.com/monetas/btcchain"
+	"github.com/monetas/btcnet"
+	rpc "github.com/monetas/btcrpcclient"
+	"github.com/monetas/btcscript"
+	"github.com/monetas/btcutil"
+	"github.com/monetas/btcwire"
 )
 
 // Block contains the block hash and height as received in a

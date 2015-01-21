@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"log"
 
-	rpc "github.com/btcsuite/btcrpcclient"
-	"github.com/btcsuite/btcutil"
-	"github.com/btcsuite/btcwire"
+	rpc "github.com/monetas/btcrpcclient"
+	"github.com/monetas/btcutil"
+	"github.com/monetas/btcwire"
 )
 
 // Miner holds all the core features required to register, run, control,
